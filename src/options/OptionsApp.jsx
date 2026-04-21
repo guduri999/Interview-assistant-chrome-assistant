@@ -32,8 +32,10 @@ function OptionsApp() {
         
         <label>Transcription Engine</label>
         <select value={engine} onChange={(e) => setEngine(e.target.value)}>
-            <option value="whisper">Groq Whisper API (Prevents Outer-Voice Loops)</option>
-            <option value="native">Chrome Native Speech (Fastest, zero API cost)</option>
+            <option value="whisper">Whisper (Groq)</option>
+            <option value="native">Native (Browser)</option>
+            <option value="engine3">Engine 3 (Future)</option>
+            <option value="engine4">Engine 4 (Future)</option>
         </select>
         
         <label>Groq API Key</label>

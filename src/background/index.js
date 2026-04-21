@@ -166,7 +166,8 @@ async function transcribeAudioWithGroq(base64Audio, tabId) {
         if (data.segments) {
             let actualSpeech = "";
             for (let segment of data.segments) {
-                if (segment.no_speech_prob < 0.5) actualSpeech += segment.text + " ";
+                // Extremely strict probability threshold (0.25) to kill Whisper V3 hallucinations
+                if (segment.no_speech_prob < 0.25) actualSpeech += segment.text + " ";
             }
             actualSpeech = actualSpeech.trim();
             chrome.tabs.sendMessage(tabId, { action: "CHUNK_TRANSCRIBED", text: actualSpeech });

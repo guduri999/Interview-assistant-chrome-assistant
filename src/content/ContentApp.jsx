@@ -11,6 +11,7 @@ function ContentApp() {
         x: (window.innerWidth - 650) / 2, 
         y: (window.innerHeight - 600) / 2 
     })
+    const [activeEngine, setActiveEngine] = useState("init...")
 
     // Logic Persistence Refs
     const isListeningRef = useRef(false)
@@ -132,6 +133,7 @@ function ContentApp() {
         addLog("Chat exported successfully")
     }
 
+    // Engine Switcher
     useEffect(() => {
         if (!isListening) {
             cleanupHardware()
@@ -139,11 +141,24 @@ function ContentApp() {
         }
         fullTranscriptRef.current = "" // Reset on new session
         chrome.storage.local.get(['TRANSCRIPTION_ENGINE'], (res) => {
-            stateRef.current.engine = res.TRANSCRIPTION_ENGINE || 'whisper'
-            if (stateRef.current.engine === 'whisper') startWhisper()
-            else startNative()
+            const engineId = res.TRANSCRIPTION_ENGINE || 'whisper'
+            addLog(`Initializing Engine: ${engineId.toUpperCase()}`, 'info')
+            setActiveEngine(engineId.toUpperCase())
+            
+            if (engineId === 'whisper') startWhisper()
+            else if (engineId === 'native') startNative()
+            else if (engineId === 'engine3') startEngine3()
+            else if (engineId === 'engine4') startEngine4()
         })
     }, [isListening])
+
+    const startEngine3 = () => {
+        addLog("Engine 3 not implemented yet", "warn")
+    }
+
+    const startEngine4 = () => {
+        addLog("Engine 4 not implemented yet", "warn")
+    }
 
     const cleanupHardware = () => {
         if (vadIntervalId.current) clearInterval(vadIntervalId.current)
@@ -196,7 +211,8 @@ function ContentApp() {
             }
 
             const pcm = new Float32Array(analyser.fftSize)
-            let isSpeakingLocal = false
+            let volumeSpikeCount = 0
+            let isSustainedSpeaking = false
             let silTimer = null
             let phraseStart = 0
 
@@ -205,24 +221,33 @@ function ContentApp() {
                 analyser.getFloatTimeDomainData(pcm)
                 let sumSq = 0; for (let v of pcm) sumSq += v * v
                 const rms = Math.sqrt(sumSq / pcm.length)
-
-                if (rms > 0.005) {
-                    if (!isSpeakingLocal) {
-                        isSpeakingLocal = true; phraseStart = Date.now()
-                        if (recorderRef.current.state === 'inactive') recorderRef.current.start()
+                
+                // Increased threshold slightly and added "sustained" check
+                if (rms > 0.020) {
+                    volumeSpikeCount++
+                    
+                    // Only start "Actual" recording after 150ms of sustained sound
+                    // This ignores clicks, mouse-taps, keyboard-taps, etc.
+                    if (volumeSpikeCount > 3) { 
+                        if (!isSustainedSpeaking) {
+                            isSustainedSpeaking = true; phraseStart = Date.now()
+                            if (recorderRef.current.state === 'inactive') recorderRef.current.start()
+                        }
                     }
                     clearTimeout(silTimer); silTimer = null
-
-                    // Force slice every 7s or on silence
-                    if (Date.now() - phraseStart > 7000) {
-                        isSpeakingLocal = false
+                    
+                    if (isSustainedSpeaking && Date.now() - phraseStart > 7000) {
+                        isSustainedSpeaking = false; volumeSpikeCount = 0
                         if (recorderRef.current.state === 'recording') recorderRef.current.stop()
                     }
-                } else if (isSpeakingLocal) {
+                } else if (isSustainedSpeaking) {
+                    volumeSpikeCount = 0
                     if (!silTimer) silTimer = setTimeout(() => {
-                        isSpeakingLocal = false
+                        isSustainedSpeaking = false
                         if (recorderRef.current.state === 'recording') recorderRef.current.stop()
-                    }, 1500)
+                    }, 1200)
+                } else {
+                    volumeSpikeCount = Math.max(0, volumeSpikeCount - 1)
                 }
             }, 50)
             addLog("Whisper VAD Engine Initialized")
@@ -261,6 +286,7 @@ function ContentApp() {
                 <div id="ai-interview-drag-handle">
                     <span className={`status-dot ${!isPaused ? 'active' : ''}`}></span>
                     AI Assistant
+                    <span className="engine-badge">{activeEngine}</span>
                 </div>
                 <div className="ai-controls-group">
                     <button onClick={stopAssistant} title="Close Assistant">
