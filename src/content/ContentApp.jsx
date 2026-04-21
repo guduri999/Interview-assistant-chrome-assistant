@@ -3,119 +3,120 @@ import { useState, useEffect, useRef } from 'react'
 function ContentApp() {
     const [isListening, setIsListening] = useState(false)
     const [isPaused, setIsPaused] = useState(false)
-    const [transcript, setTranscript] = useState([])
+    const [transcriptItems, setTranscriptItems] = useState([])
     const [aiResponses, setAiResponses] = useState([])
     const [logs, setLogs] = useState([])
     const [autoScroll, setAutoScroll] = useState(true)
     const [position, setPosition] = useState({ x: 0, y: 0 })
     
-    // Position tracking Refs
-    const isDragging = useRef(false)
-    const offset = useRef({ x: 0, y: 0 })
+    // Logic Persistence Refs
+    const isListeningRef = useRef(false)
+    const isPausedRef = useRef(false)
+    const fullTranscriptRef = useRef("")
+    const stateRef = useRef({ engine: 'whisper' })
     
-    // Logic Refs
-    const stateRef = useRef({ isListening: false, isPaused: false, transcript: [] })
-    const recorderRef = useRef(null)
+    // Drag Refs
+    const dragInfo = useRef({ isDragging: false, offset: { x: 0, y: 0 } })
+    
+    // Hardware Refs
     const streamRef = useRef(null)
+    const recorderRef = useRef(null)
     const recognitionRef = useRef(null)
-    const activeAiBlockRef = useRef(null)
-    const chunksRef = useRef([])
+    const aiStreamBlockId = useRef(null)
+    const chunksBuffer = useRef([])
+    const vadIntervalId = useRef(null)
 
-    const transcriptRef = useRef(null)
-    const aiRef = useRef(null)
-    const logRef = useRef(null)
-
+    // Sync state to refs for use in intervals/callbacks
     useEffect(() => {
-        stateRef.current.isListening = isListening
-        stateRef.current.isPaused = isPaused
+        isListeningRef.current = isListening
+        isPausedRef.current = isPaused
     }, [isListening, isPaused])
 
+    const addLog = (text, type = 'info') => {
+        setLogs(prev => [...prev, { text, time: new Date().toLocaleTimeString(), type, id: Date.now() }])
+    }
+
+    const appendToTranscript = (text) => {
+        if (!text) return
+        fullTranscriptRef.current += (fullTranscriptRef.current ? " " : "") + text
+        setTranscriptItems(prev => [...prev, text])
+        
+        // Critical: Send to background to trigger Groq AI
+        chrome.runtime.sendMessage({ 
+            action: "PROCESS_TRANSCRIPT", 
+            transcript: fullTranscriptRef.current 
+        })
+    }
+
+    // Message Listener
     useEffect(() => {
         const listener = (request, sender, sendResponse) => {
             if (request.action === 'GET_STATUS') {
-                sendResponse({ isListening: stateRef.current.isListening })
+                sendResponse({ isListening: isListeningRef.current })
             } else if (request.action === 'TOGGLE_LISTENING') {
-                setIsListening(prev => !prev)
+                setIsListening(p => !p)
             } else if (request.action === 'START_LISTENING') {
                 setIsListening(true)
             } else if (request.action === 'STOP_LISTENING') {
                 setIsListening(false)
             } else if (request.action === 'CHUNK_TRANSCRIBED') {
                 if (request.text) {
-                   setTranscript(prev => [...prev, request.text])
-                   addLog(`Processed: ${request.text.slice(0, 30)}...`)
+                    appendToTranscript(request.text)
+                    addLog(`Transcribed: ${request.text.slice(0, 40)}...`)
                 } else {
-                   addLog(`Silence detected / Hallucination dropped.`, 'warn')
+                    addLog("Silence/Hallucination dropped", "warn")
                 }
             } else if (request.action === 'SHOW_AI_RESPONSE') {
-                if (request.response === 'Thinking...') return
+                if (request.response === "Thinking...") return
                 setAiResponses(prev => [...prev, { text: request.response, id: Date.now() }])
             } else if (request.action === 'START_AI_STREAM') {
                 const id = Date.now()
+                aiStreamBlockId.current = id
                 setAiResponses(prev => [...prev, { text: '', id, isStreaming: true }])
-                activeAiBlockRef.current = id
             } else if (request.action === 'STREAM_AI_TOKEN') {
-                setAiResponses(prev => prev.map(msg => 
-                    msg.id === activeAiBlockRef.current ? { ...msg, text: msg.text + request.token } : msg
-                ))
+                setAiResponses(prev => prev.map(m => m.id === aiStreamBlockId.current ? { ...m, text: m.text + request.token } : m))
             } else if (request.action === 'DELETE_SPAM_BLOCK') {
-                setAiResponses(prev => prev.filter(msg => msg.id !== activeAiBlockRef.current))
+                setAiResponses(prev => prev.filter(m => m.id !== aiStreamBlockId.current))
             }
         }
         chrome.runtime.onMessage.addListener(listener)
         return () => chrome.runtime.onMessage.removeListener(listener)
     }, [])
 
-    const addLog = (text, type = 'info') => {
-        setLogs(prev => [...prev, { text, time: new Date().toLocaleTimeString(), type, id: Date.now() }])
-    }
-
-    // Drag Logic
+    // Global Drag
     useEffect(() => {
-        const handleMouseMove = (e) => {
-            if (!isDragging.current) return
+        const move = (e) => {
+            if (!dragInfo.current.isDragging) return
             setPosition({
-                x: e.clientX - offset.current.x,
-                y: e.clientY - offset.current.y
+                x: e.clientX - dragInfo.current.offset.x,
+                y: e.clientY - dragInfo.current.offset.y
             })
         }
-        const handleMouseUp = () => { isDragging.current = false }
-        document.addEventListener('mousemove', handleMouseMove)
-        document.addEventListener('mouseup', handleMouseUp)
-        return () => {
-            document.removeEventListener('mousemove', handleMouseMove)
-            document.removeEventListener('mouseup', handleMouseUp)
-        }
+        const stop = () => { dragInfo.current.isDragging = false }
+        document.addEventListener('mousemove', move); document.addEventListener('mouseup', stop)
+        return () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', stop) }
     }, [])
 
-    const startDragging = (e) => {
-        isDragging.current = true
-        offset.current = {
-            x: e.clientX - position.x,
-            y: e.clientY - position.y
-        }
-    }
-
-    // Speech & VAD Engine
+    // Engine Switcher
     useEffect(() => {
         if (!isListening) {
-            stopAll()
+            cleanupHardware()
             return
         }
+        fullTranscriptRef.current = "" // Reset on new session
         chrome.storage.local.get(['TRANSCRIPTION_ENGINE'], (res) => {
-            const engine = res.TRANSCRIPTION_ENGINE || 'whisper'
-            if (engine === 'whisper') startWhisper()
+            stateRef.current.engine = res.TRANSCRIPTION_ENGINE || 'whisper'
+            if (stateRef.current.engine === 'whisper') startWhisper()
             else startNative()
         })
     }, [isListening])
 
-    const stopAll = () => {
+    const cleanupHardware = () => {
+        if (vadIntervalId.current) clearInterval(vadIntervalId.current)
         if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
         if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop()
         if (recognitionRef.current) recognitionRef.current.stop()
-        streamRef.current = null
-        recorderRef.current = null
-        recognitionRef.current = null
+        streamRef.current = null; recorderRef.current = null; recognitionRef.current = null;
     }
 
     const startNative = () => {
@@ -125,19 +126,16 @@ function ContentApp() {
         recognitionRef.current.continuous = true
         recognitionRef.current.interimResults = true
         recognitionRef.current.onresult = (e) => {
-            if (stateRef.current.isPaused) return
+            if (isPausedRef.current) return
             let final = ""
             for (let i = e.resultIndex; i < e.results.length; ++i) {
                 if (e.results[i].isFinal) final += e.results[i][0].transcript
             }
-            if (final) {
-                const text = final.trim()
-                setTranscript(prev => [...prev, text])
-                chrome.runtime.sendMessage({ action: "PROCESS_TRANSCRIPT", transcript: text })
-            }
+            if (final) appendToTranscript(final.trim())
         }
-        recognitionRef.current.onend = () => { if (stateRef.current.isListening) try { recognitionRef.current.start() } catch(e){} }
+        recognitionRef.current.onend = () => { if (isListeningRef.current) try { recognitionRef.current.start() } catch(err){} }
         recognitionRef.current.start()
+        addLog("Native Engine Started")
     }
 
     const startWhisper = async () => {
@@ -150,11 +148,11 @@ function ContentApp() {
             source.connect(analyser)
             
             recorderRef.current = new MediaRecorder(streamRef.current)
-            recorderRef.current.ondataavailable = e => chunksRef.current.push(e.data)
+            recorderRef.current.ondataavailable = e => chunksBuffer.current.push(e.data)
             recorderRef.current.onstop = () => {
-                const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
-                chunksRef.current = []
-                if (blob.size > 0 && stateRef.current.isListening && !stateRef.current.isPaused) {
+                const blob = new Blob(chunksBuffer.current, { type: 'audio/webm' })
+                chunksBuffer.current = []
+                if (blob.size > 0 && isListeningRef.current && !isPausedRef.current) {
                     const reader = new FileReader()
                     reader.readAsDataURL(blob)
                     reader.onloadend = () => {
@@ -166,52 +164,60 @@ function ContentApp() {
             const pcm = new Float32Array(analyser.fftSize)
             let isSpeakingLocal = false
             let silTimer = null
-            const vadInterval = setInterval(() => {
-                if (!stateRef.current.isListening || stateRef.current.isPaused) return
+            let phraseStart = 0
+
+            vadIntervalId.current = setInterval(() => {
+                if (!isListeningRef.current || isPausedRef.current) return
                 analyser.getFloatTimeDomainData(pcm)
-                let sumSq = 0
-                for (let v of pcm) sumSq += v * v
+                let sumSq = 0; for (let v of pcm) sumSq += v * v
                 const rms = Math.sqrt(sumSq / pcm.length)
                 
                 if (rms > 0.005) {
                     if (!isSpeakingLocal) {
-                        isSpeakingLocal = true
+                        isSpeakingLocal = true; phraseStart = Date.now()
                         if (recorderRef.current.state === 'inactive') recorderRef.current.start()
                     }
-                    clearTimeout(silTimer)
+                    clearTimeout(silTimer); silTimer = null
+                    
+                    // Force slice every 7s or on silence
+                    if (Date.now() - phraseStart > 7000) {
+                        isSpeakingLocal = false
+                        if (recorderRef.current.state === 'recording') recorderRef.current.stop()
+                    }
                 } else if (isSpeakingLocal) {
                     if (!silTimer) silTimer = setTimeout(() => {
                         isSpeakingLocal = false
                         if (recorderRef.current.state === 'recording') recorderRef.current.stop()
-                        silTimer = null
                     }, 1500)
                 }
             }, 50)
-            return () => { clearInterval(vadInterval); stopAll() }
-        } catch (e) { addLog("Microphone access denied!", "error") }
+            addLog("Whisper VAD Engine Initialized")
+        } catch (e) { addLog("Microphone Access Denied!", "error") }
     }
 
+    // Refs for containers to handle manual auto-scroll
+    const tRef = useRef(null); const aRef = useRef(null); const lRef = useRef(null);
     useEffect(() => {
-        if (autoScroll) {
-            [transcriptRef, aiRef, logRef].forEach(ref => {
-                if (ref.current) ref.current.scrollTop = ref.current.scrollHeight
-            })
-        }
-    }, [transcript, aiResponses, logs, autoScroll])
+        if (!autoScroll) return
+        [tRef, aRef, lRef].forEach(r => { if (r.current) r.current.scrollTop = r.current.scrollHeight })
+    }, [transcriptItems, aiResponses, logs, autoScroll])
 
     if (!isListening) return null
 
     return (
         <div id="ai-interview-overlay" style={{ transform: `translate3d(${position.x}px, ${position.y}px, 0)` }}>
-            <div id="ai-interview-header" onMouseDown={startDragging}>
+            <div id="ai-interview-header" onMouseDown={(e) => {
+                dragInfo.current.isDragging = true
+                dragInfo.current.offset = { x: e.clientX - position.x, y: e.clientY - position.y }
+            }}>
                 <div className="ai-controls-group">
-                    <button onClick={() => setAutoScroll(!autoScroll)} className={!autoScroll ? 'off' : ''} title="Toggle Scroll">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 13l5 5 5-5M7 6l5 5 5-5"/></svg>
+                    <button onClick={() => setAutoScroll(!autoScroll)} className={!autoScroll ? 'off' : ''} title="Auto-scroll">
+                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 13l5 5 5-5M7 6l5 5 5-5"/></svg>
                     </button>
-                    <button onClick={() => setIsPaused(!isPaused)} className={isPaused ? 'paused' : ''} title={isPaused ? "Resume" : "Pause"}>
-                        {isPaused ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 3l14 9-14 9V3z"/></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 4h4v16H6zM14 4h4v16h4z"/></svg>}
+                    <button onClick={() => setIsPaused(!isPaused)} className={isPaused ? 'paused' : ''}>
+                         {isPaused ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 3l14 9-14 9V3z"/></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 4h4v16H6zM14 4h4v16h4z"/></svg>}
                     </button>
-                    <button onClick={() => { setTranscript([]); setAiResponses([]); setLogs([]) }} title="Clear All">
+                    <button onClick={() => { setTranscriptItems([]); setAiResponses([]); setLogs([]); fullTranscriptRef.current = "" }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                     </button>
                 </div>
@@ -220,7 +226,7 @@ function ContentApp() {
                     AI Assistant
                 </div>
                 <div className="ai-controls-group">
-                    <button onClick={() => setIsListening(false)} title="Close">
+                    <button onClick={() => setIsListening(false)} title="Close Assistant">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
                 </div>
@@ -229,30 +235,24 @@ function ContentApp() {
             <div id="ai-interview-body">
                 <div className="ai-interview-pane">
                     <div className="ai-interview-pane-title">Live Transcript</div>
-                    <div className="pane-content" ref={transcriptRef}>
-                        {transcript.length === 0 ? <div className="placeholder">Listening to audio...</div> : transcript.map((t, i) => <div key={i} className="msg">{t}</div>)}
+                    <div className="pane-content" ref={tRef}>
+                        {transcriptItems.length === 0 ? <div className="placeholder">Listening...</div> : transcriptItems.map((t, i) => <div key={i} className="msg">{t}</div>)}
                     </div>
                 </div>
                 <div className="ai-interview-pane">
                     <div className="ai-interview-pane-title">AI Suggestions</div>
-                    <div className="pane-content" ref={aiRef}>
-                        {aiResponses.length === 0 ? <div className="placeholder">Waiting for question...</div> : aiResponses.map(m => (
-                            <div key={m.id} className={`ai-msg ${m.isStreaming ? 'streaming' : ''}`}>
-                                {m.text}
-                            </div>
+                    <div className="pane-content" ref={aRef}>
+                        {aiResponses.length === 0 ? <div className="placeholder">Awaiting question...</div> : aiResponses.map(m => (
+                            <div key={m.id} className={`ai-msg ${m.isStreaming ? 'streaming' : ''}`}>{m.text}</div>
                         ))}
                     </div>
                 </div>
             </div>
             
             <div className="ai-interview-pane bottom-pane">
-                <div className="ai-interview-pane-title">System Logs</div>
-                <div className="pane-content log-content" ref={logRef}>
-                    {logs.map(l => (
-                        <div key={l.id} className={l.type}>
-                            <span className="log-time">[{l.time}]</span> {l.text}
-                        </div>
-                    ))}
+                <div className="ai-interview-pane-title">Log</div>
+                <div className="pane-content log-content" ref={lRef}>
+                    {logs.map(l => <div key={l.id} className={l.type}><span className="log-time">[{l.time}]</span> {l.text}</div>)}
                 </div>
             </div>
         </div>

@@ -1,10 +1,14 @@
 #ai-interview-overlay {
     position: fixed; top: 20px; right: 20px; width: 650px;
-    background: rgba(18, 18, 18, 0.98); color: white;
-    border-radius: 12px; z-index: 2147483647;
-    box-shadow: 0 12px 48px rgba(0,0,0,0.6);
-    font-family: 'Inter', system-ui, sans-serif; display: flex; flex-direction: column;
-    backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(10, 10, 10, 0.75); 
+    color: #f0f0f0;
+    border-radius: 16px; z-index: 2147483647;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif; 
+    display: flex; flex-direction: column;
+    backdrop-filter: blur(20px) saturate(180%); 
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255,255,255,0.12);
     overflow: hidden; user-select: none;
 }
 #ai-interview-header {

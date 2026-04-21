@@ -27,7 +27,7 @@ function OptionsApp() {
 
   return (
     <div className="container">
-        <h2>Settings</h2>
+        <h2>Configuration Settings</h2>
         <p>Set your Groq API key here. The AI Assistant will directly start whenever you click the extension icon on a webpage.</p>
         
         <label>Transcription Engine</label>
