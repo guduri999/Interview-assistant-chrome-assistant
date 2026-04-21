@@ -50,6 +50,8 @@ async function setOffscreenPaused(paused) {
 }
 
 async function startOffscreenTabEngine(tabId) {
+    await stopOffscreenPlayback().catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 150));
     await ensureOffscreenDocument();
 
     return new Promise((resolve) => {

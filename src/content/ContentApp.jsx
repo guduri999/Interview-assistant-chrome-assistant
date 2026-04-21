@@ -18,6 +18,7 @@ function ContentApp() {
     const isPausedRef = useRef(false)
     const fullTranscriptRef = useRef("")
     const stateRef = useRef({ engine: 'whisper' })
+    const hasSyncedPauseRef = useRef(false)
 
     // Drag Refs
     const dragInfo = useRef({ isDragging: false, offset: { x: 0, y: 0 } })
@@ -106,6 +107,7 @@ function ContentApp() {
 
     const stopAssistant = () => {
         setIsListening(false)
+        setIsPaused(false)
         setTranscriptItems([])
         setAiResponses([])
         setLogs([])
@@ -164,6 +166,10 @@ function ContentApp() {
     }, [isListening])
 
     useEffect(() => {
+        if (!isListening) {
+            hasSyncedPauseRef.current = false
+            return
+        }
         if (!isListening) return
         if (stateRef.current.engine !== 'tab') return
 
@@ -178,7 +184,11 @@ function ContentApp() {
                 return
             }
 
-            addLog(isPaused ? "Tab audio transcription paused" : "Tab audio transcription resumed", "info")
+            if (hasSyncedPauseRef.current) {
+                addLog(isPaused ? "Tab audio transcription paused" : "Tab audio transcription resumed", "info")
+            } else {
+                hasSyncedPauseRef.current = true
+            }
         })
     }, [isPaused, isListening])
 
