@@ -1,5 +1,7 @@
 let audioContext = null;
 let captureStream = null;
+let playbackStream = null;
+let processingStream = null;
 let mediaRecorder = null;
 let chunksBuffer = [];
 let vadIntervalId = null;
@@ -25,6 +27,16 @@ async function stopEngine() {
     if (captureStream) {
         captureStream.getTracks().forEach((track) => track.stop());
         captureStream = null;
+    }
+
+    if (playbackStream) {
+        playbackStream.getTracks().forEach((track) => track.stop());
+        playbackStream = null;
+    }
+
+    if (processingStream) {
+        processingStream.getTracks().forEach((track) => track.stop());
+        processingStream = null;
     }
 
     if (audioContext) {
@@ -53,16 +65,19 @@ async function startEngine(streamId, tabId) {
 
     activeTabId = tabId;
     isPaused = false;
+    playbackStream = captureStream.clone();
+    processingStream = captureStream.clone();
 
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
     audioContext = new AudioContextCtor();
 
-    const source = audioContext.createMediaStreamSource(captureStream);
+    const playbackSource = audioContext.createMediaStreamSource(playbackStream);
+    const processingSource = audioContext.createMediaStreamSource(processingStream);
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 512;
 
-    source.connect(analyser);
-    source.connect(audioContext.destination);
+    processingSource.connect(analyser);
+    playbackSource.connect(audioContext.destination);
 
     if (audioContext.state === 'suspended') {
         await audioContext.resume();
@@ -73,7 +88,7 @@ async function startEngine(streamId, tabId) {
         : 'audio/webm';
 
     mediaRecorder = new MediaRecorder(
-        captureStream,
+        processingStream,
         preferredMimeType ? { mimeType: preferredMimeType } : undefined
     );
 
