@@ -29,6 +29,8 @@ function ContentApp() {
     const aiStreamBlockId = useRef(null)
     const chunksBuffer = useRef([])
     const vadIntervalId = useRef(null)
+    const audioContextRef = useRef(null)
+    const silenceTimeoutRef = useRef(null)
 
     // Sync state to refs for use in intervals/callbacks
     useEffect(() => {
@@ -139,7 +141,13 @@ function ContentApp() {
             cleanupHardware()
             return
         }
-        fullTranscriptRef.current = "" // Reset on new session
+        
+        // RESET ALL DATA ON START / REOPEN
+        setTranscriptItems([])
+        setAiResponses([])
+        setLogs([])
+        fullTranscriptRef.current = "" 
+
         chrome.storage.local.get(['TRANSCRIPTION_ENGINE'], (res) => {
             const engineId = res.TRANSCRIPTION_ENGINE || 'whisper'
             addLog(`Initializing Engine: ${engineId.toUpperCase()}`, 'info')
@@ -147,6 +155,7 @@ function ContentApp() {
             
             if (engineId === 'whisper') startWhisper()
             else if (engineId === 'native') startNative()
+            else if (engineId === 'tab') startTabAudio()
             else if (engineId === 'engine3') startEngine3()
             else if (engineId === 'engine4') startEngine4()
         })
@@ -162,15 +171,128 @@ function ContentApp() {
 
     const cleanupHardware = () => {
         if (vadIntervalId.current) clearInterval(vadIntervalId.current)
+        if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current)
         if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
         if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop()
         if (recognitionRef.current) recognitionRef.current.stop()
-        streamRef.current = null; recorderRef.current = null; recognitionRef.current = null;
+        if (audioContextRef.current) audioContextRef.current.close().catch(() => {})
+        streamRef.current = null
+        recorderRef.current = null
+        recognitionRef.current = null
+        audioContextRef.current = null
+        silenceTimeoutRef.current = null
+        chunksBuffer.current = []
+    }
+
+    const startChunkedAudioCapture = async (stream, {
+        label,
+        threshold,
+        silenceMs = 1200,
+        maxPhraseMs = 7000,
+        sustainedFrames = 3
+    }) => {
+        if (!stream.getAudioTracks().length) {
+            throw new Error(`${label} did not expose an audio track.`)
+        }
+
+        streamRef.current = stream
+        stream.getAudioTracks().forEach((track) => {
+            track.onended = () => {
+                if (!isListeningRef.current) return
+                addLog(`${label} capture ended. Restart the assistant to try again.`, 'warn')
+                cleanupHardware()
+            }
+        })
+
+        const AudioContextCtor = window.AudioContext || window.webkitAudioContext
+        audioContextRef.current = new AudioContextCtor()
+        const sourceNode = audioContextRef.current.createMediaStreamSource(stream)
+        const analyser = audioContextRef.current.createAnalyser()
+        analyser.fftSize = 512
+        sourceNode.connect(analyser)
+
+        const preferredMimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+            ? 'audio/webm;codecs=opus'
+            : 'audio/webm'
+        recorderRef.current = new MediaRecorder(stream, preferredMimeType ? { mimeType: preferredMimeType } : undefined)
+        recorderRef.current.ondataavailable = e => chunksBuffer.current.push(e.data)
+        recorderRef.current.onstop = () => {
+            const blob = new Blob(chunksBuffer.current, { type: 'audio/webm' })
+            chunksBuffer.current = []
+
+            if (blob.size > 0 && isListeningRef.current && !isPausedRef.current) {
+                const reader = new FileReader()
+                reader.readAsDataURL(blob)
+                reader.onloadend = () => {
+                    chrome.runtime.sendMessage({
+                        action: "TRANSCRIBE_CHUNK",
+                        audioData: reader.result.split(',')[1]
+                    })
+                }
+            }
+        }
+
+        const pcm = new Float32Array(analyser.fftSize)
+        let volumeSpikeCount = 0
+        let isSustainedSpeaking = false
+        let phraseStart = 0
+
+        vadIntervalId.current = setInterval(() => {
+            if (!isListeningRef.current || isPausedRef.current) return
+
+            analyser.getFloatTimeDomainData(pcm)
+            let sumSq = 0
+            for (let v of pcm) sumSq += v * v
+            const rms = Math.sqrt(sumSq / pcm.length)
+
+            if (rms > threshold) {
+                volumeSpikeCount++
+
+                if (volumeSpikeCount > sustainedFrames) {
+                    if (!isSustainedSpeaking) {
+                        isSustainedSpeaking = true
+                        phraseStart = Date.now()
+                        chunksBuffer.current = []
+
+                        if (recorderRef.current.state === 'inactive') {
+                            recorderRef.current.start()
+                        }
+                    }
+                }
+
+                if (silenceTimeoutRef.current) {
+                    clearTimeout(silenceTimeoutRef.current)
+                    silenceTimeoutRef.current = null
+                }
+
+                if (isSustainedSpeaking && Date.now() - phraseStart > maxPhraseMs) {
+                    isSustainedSpeaking = false
+                    volumeSpikeCount = 0
+                    if (recorderRef.current.state === 'recording') recorderRef.current.stop()
+                }
+            } else if (isSustainedSpeaking) {
+                volumeSpikeCount = 0
+                if (!silenceTimeoutRef.current) {
+                    silenceTimeoutRef.current = setTimeout(() => {
+                        silenceTimeoutRef.current = null
+                        isSustainedSpeaking = false
+                        if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
+                    }, silenceMs)
+                }
+            } else {
+                volumeSpikeCount = Math.max(0, volumeSpikeCount - 1)
+            }
+        }, 50)
+
+        addLog(`${label} Engine Initialized`)
     }
 
     const startNative = () => {
         const Speech = window.SpeechRecognition || window.webkitSpeechRecognition
-        if (!Speech) return
+        if (!Speech) {
+            addLog("Native speech recognition is not available in this browser", "error")
+            return
+        }
         recognitionRef.current = new Speech()
         recognitionRef.current.continuous = true
         recognitionRef.current.interimResults = true
@@ -189,69 +311,63 @@ function ContentApp() {
 
     const startWhisper = async () => {
         try {
-            streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true })
-            const ctx = new (window.AudioContext || window.webkitAudioContext)()
-            const source = ctx.createMediaStreamSource(streamRef.current)
-            const analyser = ctx.createAnalyser()
-            analyser.fftSize = 512
-            source.connect(analyser)
-
-            recorderRef.current = new MediaRecorder(streamRef.current)
-            recorderRef.current.ondataavailable = e => chunksBuffer.current.push(e.data)
-            recorderRef.current.onstop = () => {
-                const blob = new Blob(chunksBuffer.current, { type: 'audio/webm' })
-                chunksBuffer.current = []
-                if (blob.size > 0 && isListeningRef.current && !isPausedRef.current) {
-                    const reader = new FileReader()
-                    reader.readAsDataURL(blob)
-                    reader.onloadend = () => {
-                        chrome.runtime.sendMessage({ action: "TRANSCRIBE_CHUNK", audioData: reader.result.split(',')[1] })
-                    }
+            const micStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
                 }
+            })
+
+            await startChunkedAudioCapture(micStream, {
+                label: "Whisper VAD",
+                threshold: 0.020,
+                silenceMs: 1200,
+                maxPhraseMs: 7000,
+                sustainedFrames: 3
+            })
+        } catch (e) {
+            addLog("Microphone Access Denied!", "error")
+        }
+    }
+
+    const startTabAudio = () => {
+        addLog("Requesting current tab audio capture...", "info")
+
+        chrome.runtime.sendMessage({ action: "GET_TAB_AUDIO_STREAM_ID" }, async (response) => {
+            if (chrome.runtime.lastError) {
+                addLog(`Tab audio capture failed: ${chrome.runtime.lastError.message}`, "error")
+                return
             }
 
-            const pcm = new Float32Array(analyser.fftSize)
-            let volumeSpikeCount = 0
-            let isSustainedSpeaking = false
-            let silTimer = null
-            let phraseStart = 0
+            if (!response?.ok || !response.streamId) {
+                addLog(response?.error || "Tab audio capture is unavailable on this page.", "error")
+                return
+            }
 
-            vadIntervalId.current = setInterval(() => {
-                if (!isListeningRef.current || isPausedRef.current) return
-                analyser.getFloatTimeDomainData(pcm)
-                let sumSq = 0; for (let v of pcm) sumSq += v * v
-                const rms = Math.sqrt(sumSq / pcm.length)
-                
-                // Increased threshold slightly and added "sustained" check
-                if (rms > 0.020) {
-                    volumeSpikeCount++
-                    
-                    // Only start "Actual" recording after 150ms of sustained sound
-                    // This ignores clicks, mouse-taps, keyboard-taps, etc.
-                    if (volumeSpikeCount > 3) { 
-                        if (!isSustainedSpeaking) {
-                            isSustainedSpeaking = true; phraseStart = Date.now()
-                            if (recorderRef.current.state === 'inactive') recorderRef.current.start()
+            try {
+                const tabStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        mandatory: {
+                            chromeMediaSource: 'tab',
+                            chromeMediaSourceId: response.streamId
                         }
-                    }
-                    clearTimeout(silTimer); silTimer = null
-                    
-                    if (isSustainedSpeaking && Date.now() - phraseStart > 7000) {
-                        isSustainedSpeaking = false; volumeSpikeCount = 0
-                        if (recorderRef.current.state === 'recording') recorderRef.current.stop()
-                    }
-                } else if (isSustainedSpeaking) {
-                    volumeSpikeCount = 0
-                    if (!silTimer) silTimer = setTimeout(() => {
-                        isSustainedSpeaking = false
-                        if (recorderRef.current.state === 'recording') recorderRef.current.stop()
-                    }, 1200)
-                } else {
-                    volumeSpikeCount = Math.max(0, volumeSpikeCount - 1)
-                }
-            }, 50)
-            addLog("Whisper VAD Engine Initialized")
-        } catch (e) { addLog("Microphone Access Denied!", "error") }
+                    },
+                    video: false
+                })
+
+                addLog("Capturing tab audio only. Microphone is not used.", "info")
+                await startChunkedAudioCapture(tabStream, {
+                    label: "Tab Audio",
+                    threshold: 0.008,
+                    silenceMs: 1500,
+                    maxPhraseMs: 7000,
+                    sustainedFrames: 2
+                })
+            } catch (e) {
+                addLog(`Unable to start tab audio capture: ${e.message}`, "error")
+            }
+        })
     }
 
     // Refs for containers to handle manual auto-scroll

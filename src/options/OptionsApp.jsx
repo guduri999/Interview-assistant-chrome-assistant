@@ -34,6 +34,7 @@ function OptionsApp() {
         <select value={engine} onChange={(e) => setEngine(e.target.value)}>
             <option value="whisper">Whisper (Groq)</option>
             <option value="native">Native (Browser)</option>
+            <option value="tab">Tab Audio (No Mic)</option>
             <option value="engine3">Engine 3 (Future)</option>
             <option value="engine4">Engine 4 (Future)</option>
         </select>

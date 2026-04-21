@@ -20,6 +20,29 @@ chrome.action.onClicked.addListener((tab) => {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "TRANSCRIBE_CHUNK") {
         transcribeAudioWithGroq(request.audioData, sender.tab.id).catch(console.error);
+    } else if (request.action === "GET_TAB_AUDIO_STREAM_ID") {
+        const tabId = sender.tab?.id;
+        if (!tabId) {
+            sendResponse({ ok: false, error: "Unable to find the active tab for audio capture." });
+            return false;
+        }
+
+        chrome.tabCapture.getMediaStreamId({
+            targetTabId: tabId,
+            consumerTabId: tabId
+        }, (streamId) => {
+            if (chrome.runtime.lastError || !streamId) {
+                sendResponse({
+                    ok: false,
+                    error: chrome.runtime.lastError?.message || "Failed to create a tab audio stream."
+                });
+                return;
+            }
+
+            sendResponse({ ok: true, streamId });
+        });
+
+        return true;
     } else if (request.action === "STOP_LISTENING") {
         chatHistory = [];
         previousTranscript = "";

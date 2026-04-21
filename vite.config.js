@@ -10,7 +10,8 @@ const manifest = {
   permissions: [
     "activeTab",
     "storage",
-    "scripting"
+    "scripting",
+    "tabCapture"
   ],
   host_permissions: [
     "https://api.openai.com/*",
