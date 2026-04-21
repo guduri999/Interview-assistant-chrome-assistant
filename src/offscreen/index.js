@@ -1,7 +1,8 @@
-let audioContext = null;
+let processingAudioContext = null;
 let captureStream = null;
 let playbackStream = null;
 let processingStream = null;
+let playbackAudio = null;
 let mediaRecorder = null;
 let chunksBuffer = [];
 let vadIntervalId = null;
@@ -39,9 +40,16 @@ async function stopEngine() {
         processingStream = null;
     }
 
-    if (audioContext) {
-        await audioContext.close().catch(() => {});
-        audioContext = null;
+    if (playbackAudio) {
+        playbackAudio.pause();
+        playbackAudio.srcObject = null;
+        playbackAudio.remove();
+        playbackAudio = null;
+    }
+
+    if (processingAudioContext) {
+        await processingAudioContext.close().catch(() => {});
+        processingAudioContext = null;
     }
 
     mediaRecorder = null;
@@ -68,19 +76,24 @@ async function startEngine(streamId, tabId) {
     playbackStream = captureStream.clone();
     processingStream = captureStream.clone();
 
-    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-    audioContext = new AudioContextCtor();
+    playbackAudio = document.createElement('audio');
+    playbackAudio.autoplay = true;
+    playbackAudio.muted = false;
+    playbackAudio.playsInline = true;
+    playbackAudio.style.display = 'none';
+    playbackAudio.srcObject = playbackStream;
+    document.body.appendChild(playbackAudio);
+    await playbackAudio.play();
 
-    const playbackSource = audioContext.createMediaStreamSource(playbackStream);
-    const processingSource = audioContext.createMediaStreamSource(processingStream);
-    const analyser = audioContext.createAnalyser();
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    processingAudioContext = new AudioContextCtor();
+    const processingSource = processingAudioContext.createMediaStreamSource(processingStream);
+    const analyser = processingAudioContext.createAnalyser();
     analyser.fftSize = 512;
 
     processingSource.connect(analyser);
-    playbackSource.connect(audioContext.destination);
-
-    if (audioContext.state === 'suspended') {
-        await audioContext.resume();
+    if (processingAudioContext.state === 'suspended') {
+        await processingAudioContext.resume();
     }
 
     const preferredMimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
