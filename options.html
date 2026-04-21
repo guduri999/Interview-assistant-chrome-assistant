@@ -2,69 +2,9 @@
 <html>
 <head>
     <title>Interview AI Settings</title>
-    <style>
-        body { 
-            font-family: 'Inter', sans-serif; 
-            padding: 40px; 
-            background: #111; 
-            color: #fff; 
-            max-width: 500px; 
-            margin: 0 auto;
-        }
-        .container {
-            background: #222;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        }
-        h2 { margin-top: 0; font-weight: 600; }
-        p { color: #aaa; font-size: 14px; line-height: 1.5; }
-        label { display: block; margin: 20px 0 8px; font-weight: bold; }
-        input { 
-            width: 100%; 
-            padding: 12px; 
-            background: #333; 
-            color: white; 
-            border: 1px solid #555; 
-            border-radius: 6px;
-            box-sizing: border-box;
-        }
-        input:focus { outline: none; border-color: #4caf50; }
-        button { 
-            background: #2196F3; 
-            color: white; 
-            padding: 12px; 
-            border: none; 
-            cursor: pointer; 
-            border-radius: 6px; 
-            width: 100%;
-            margin-top: 25px;
-            font-weight: bold;
-            font-size: 15px;
-            transition: all 0.2s;
-        }
-        button:hover { background: #1976D2; }
-    </style>
 </head>
 <body>
-    <div class="container">
-        <h2>Settings</h2>
-        <p>Set your Groq API key here. The AI Assistant will directly start whenever you click the extension icon on a webpage.</p>
-        
-        <label>Transcription Engine</label>
-        <select id="engineSelect" style="width: 100%; padding: 12px; background: #333; color: white; border: 1px solid #555; border-radius: 6px; box-sizing: border-box; margin-bottom: 20px;">
-            <option value="whisper">Groq Whisper API (Prevents Outer-Voice Loops)</option>
-            <option value="native">Chrome Native Speech (Fastest, zero API cost)</option>
-        </select>
-        
-        <label>Groq API Key</label>
-        <input type="password" id="apiKeyInput" placeholder="gsk_...">
-        
-        <label>Job Description Context (Optional)</label>
-        <textarea id="jobDescriptionInput" placeholder="Paste the job description here so the AI can tailor its answers to the specific role..." style="width: 100%; height: 120px; padding: 12px; background: #333; color: white; border: 1px solid #555; border-radius: 6px; box-sizing: border-box; resize: vertical; font-family: 'Inter', sans-serif;"></textarea>
-        
-        <button id="saveKeyBtn">Save Settings</button>
-    </div>
-    <script src="options.js"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/options/index.jsx"></script>
 </body>
 </html>
