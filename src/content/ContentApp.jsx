@@ -66,6 +66,7 @@ function ContentApp() {
             } else if (request.action === 'STOP_LISTENING') {
                 setIsListening(false)
             } else if (request.action === 'CHUNK_TRANSCRIBED') {
+                if (isPausedRef.current) return
                 if (request.text) {
                     appendToTranscript(request.text)
                     addLog(`Transcribed: ${request.text.slice(0, 40)}...`)
@@ -150,6 +151,7 @@ function ContentApp() {
 
         chrome.storage.local.get(['TRANSCRIPTION_ENGINE'], (res) => {
             const engineId = res.TRANSCRIPTION_ENGINE || 'whisper'
+            stateRef.current.engine = engineId
             addLog(`Initializing Engine: ${engineId.toUpperCase()}`, 'info')
             setActiveEngine(engineId.toUpperCase())
             
@@ -160,6 +162,25 @@ function ContentApp() {
             else if (engineId === 'engine4') startEngine4()
         })
     }, [isListening])
+
+    useEffect(() => {
+        if (!isListening) return
+        if (stateRef.current.engine !== 'tab') return
+
+        chrome.runtime.sendMessage({ action: "SET_TAB_AUDIO_PAUSED", paused: isPaused }, (response) => {
+            if (chrome.runtime.lastError) {
+                addLog(`Pause sync failed: ${chrome.runtime.lastError.message}`, "warn")
+                return
+            }
+
+            if (!response?.ok) {
+                addLog(`Pause sync failed: ${response?.error || "Unknown error"}`, "warn")
+                return
+            }
+
+            addLog(isPaused ? "Tab audio transcription paused" : "Tab audio transcription resumed", "info")
+        })
+    }, [isPaused, isListening])
 
     const startEngine3 = () => {
         addLog("Engine 3 not implemented yet", "warn")

@@ -1,5 +1,3 @@
-import { CONFIG } from '../config.js';
-
 let debounceTimer = null;
 let lastCallTime = 0;
 let chatHistory = [];
@@ -33,6 +31,22 @@ async function stopOffscreenPlayback() {
 
     await chrome.runtime.sendMessage({ action: 'OFFSCREEN_STOP_AUDIO' }).catch(() => {});
     await chrome.offscreen.closeDocument().catch(() => {});
+}
+
+async function setOffscreenPaused(paused) {
+    if (!(await hasOffscreenDocument())) {
+        return { ok: false, error: 'Offscreen tab engine is not active.' };
+    }
+
+    try {
+        const response = await chrome.runtime.sendMessage({
+            action: 'OFFSCREEN_SET_PAUSED',
+            paused
+        });
+        return response || { ok: false, error: 'No response from offscreen document.' };
+    } catch (error) {
+        return { ok: false, error: error.message };
+    }
 }
 
 async function startOffscreenTabEngine(tabId) {
@@ -117,6 +131,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .then(sendResponse)
             .catch((error) => sendResponse({ ok: false, error: error.message }));
         return true;
+    } else if (request.action === "SET_TAB_AUDIO_PAUSED") {
+        setOffscreenPaused(Boolean(request.paused))
+            .then(sendResponse)
+            .catch((error) => sendResponse({ ok: false, error: error.message }));
+        return true;
     } else if (request.action === "STOP_LISTENING") {
         chatHistory = [];
         previousTranscript = "";
@@ -156,19 +175,19 @@ async function fetchAIResponse(transcript, tabId) {
     if (transcript.length < previousTranscript.length - 10) chatHistory = [];
     previousTranscript = transcript;
 
-    let apiKey = null;
+    let apiKey = "";
     let jobDescriptionContext = "";
     try {
         const storageData = await chrome.storage.local.get(['apiKey', 'JOB_DESCRIPTION']);
-        apiKey = storageData.apiKey || CONFIG.GROQ_API_KEY;
+        apiKey = (storageData.apiKey || "").trim();
         if (storageData.JOB_DESCRIPTION && storageData.JOB_DESCRIPTION.trim().length > 0) {
             jobDescriptionContext = `\n\nCRITICAL CONTEXT: The user is interviewing for the following Job Description. Tailor answers to specifically align with the skills, tools, and requirements mentioned here:\n"""\n${storageData.JOB_DESCRIPTION}\n"""\n\n`;
         }
     } catch (e) {
-        apiKey = CONFIG.GROQ_API_KEY;
+        apiKey = "";
     }
 
-    if (!apiKey || apiKey === "YOUR_GROQ_API_KEY") {
+    if (!apiKey) {
         chrome.tabs.sendMessage(tabId, { action: "SHOW_AI_RESPONSE", response: "Error: Please add your Groq API Key in the settings." });
         chrome.runtime.openOptionsPage();
         return;
@@ -236,13 +255,23 @@ Rules: Keep 1-2 lines max. Simple spoken English. No headings/bullets. Conversat
 }
 
 async function transcribeAudioWithGroq(base64Audio, tabId) {
-    let apiKey = null;
+    let apiKey = "";
     try {
         const storageData = await chrome.storage.local.get(['apiKey']);
-        apiKey = storageData.apiKey || CONFIG.GROQ_API_KEY;
+        apiKey = (storageData.apiKey || "").trim();
     } catch (e) {
-        apiKey = CONFIG.GROQ_API_KEY;
+        apiKey = "";
     }
+
+    if (!apiKey) {
+        chrome.tabs.sendMessage(tabId, {
+            action: "SHOW_AI_RESPONSE",
+            response: "Error: Please add your Groq API Key in the settings."
+        });
+        chrome.runtime.openOptionsPage();
+        return;
+    }
+
     const binaryString = atob(base64Audio);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);

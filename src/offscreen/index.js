@@ -5,6 +5,7 @@ let chunksBuffer = [];
 let vadIntervalId = null;
 let silenceTimeoutId = null;
 let activeTabId = null;
+let isPaused = false;
 
 async function stopEngine() {
     if (vadIntervalId) {
@@ -34,6 +35,7 @@ async function stopEngine() {
     mediaRecorder = null;
     chunksBuffer = [];
     activeTabId = null;
+    isPaused = false;
 }
 
 async function startEngine(streamId, tabId) {
@@ -50,6 +52,7 @@ async function startEngine(streamId, tabId) {
     });
 
     activeTabId = tabId;
+    isPaused = false;
 
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
     audioContext = new AudioContextCtor();
@@ -101,6 +104,8 @@ async function startEngine(streamId, tabId) {
     let phraseStart = 0;
 
     vadIntervalId = setInterval(() => {
+        if (isPaused) return;
+
         analyser.getFloatTimeDomainData(pcm);
         let sumSq = 0;
         for (const value of pcm) sumSq += value * value;
@@ -144,6 +149,22 @@ async function startEngine(streamId, tabId) {
     }, 50);
 }
 
+async function setPaused(paused) {
+    isPaused = paused;
+
+    if (silenceTimeoutId) {
+        clearTimeout(silenceTimeoutId);
+        silenceTimeoutId = null;
+    }
+
+    if (paused) {
+        chunksBuffer = [];
+        if (mediaRecorder?.state === 'recording') {
+            mediaRecorder.stop();
+        }
+    }
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'OFFSCREEN_START_TAB_ENGINE') {
         startEngine(request.streamId, request.tabId)
@@ -154,6 +175,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (request.action === 'OFFSCREEN_STOP_AUDIO') {
         stopEngine()
+            .then(() => sendResponse({ ok: true }))
+            .catch((error) => sendResponse({ ok: false, error: error.message }));
+        return true;
+    }
+
+    if (request.action === 'OFFSCREEN_SET_PAUSED') {
+        setPaused(Boolean(request.paused))
             .then(() => sendResponse({ ok: true }))
             .catch((error) => sendResponse({ ok: false, error: error.message }));
         return true;
