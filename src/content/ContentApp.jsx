@@ -7,17 +7,20 @@ function ContentApp() {
     const [aiResponses, setAiResponses] = useState([])
     const [logs, setLogs] = useState([])
     const [autoScroll, setAutoScroll] = useState(true)
-    const [position, setPosition] = useState({ x: 0, y: 0 })
-    
+    const [position, setPosition] = useState({ 
+        x: (window.innerWidth - 650) / 2, 
+        y: (window.innerHeight - 600) / 2 
+    })
+
     // Logic Persistence Refs
     const isListeningRef = useRef(false)
     const isPausedRef = useRef(false)
     const fullTranscriptRef = useRef("")
     const stateRef = useRef({ engine: 'whisper' })
-    
+
     // Drag Refs
     const dragInfo = useRef({ isDragging: false, offset: { x: 0, y: 0 } })
-    
+
     // Hardware Refs
     const streamRef = useRef(null)
     const recorderRef = useRef(null)
@@ -40,11 +43,11 @@ function ContentApp() {
         if (!text) return
         fullTranscriptRef.current += (fullTranscriptRef.current ? " " : "") + text
         setTranscriptItems(prev => [...prev, text])
-        
+
         // Critical: Send to background to trigger Groq AI
-        chrome.runtime.sendMessage({ 
-            action: "PROCESS_TRANSCRIPT", 
-            transcript: fullTranscriptRef.current 
+        chrome.runtime.sendMessage({
+            action: "PROCESS_TRANSCRIPT",
+            transcript: fullTranscriptRef.current
         })
     }
 
@@ -97,7 +100,38 @@ function ContentApp() {
         return () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', stop) }
     }, [])
 
-    // Engine Switcher
+    const stopAssistant = () => {
+        setIsListening(false)
+        setTranscriptItems([])
+        setAiResponses([])
+        setLogs([])
+        fullTranscriptRef.current = ""
+        chrome.runtime.sendMessage({ action: "STOP_LISTENING" })
+    }
+
+    const exportChat = () => {
+        let content = "Interview Session Log\n"
+        content += "Date: " + new Date().toLocaleString() + "\n"
+        content += "========================================\n\n"
+        
+        content += "--- FULL TRANSCRIPT ---\n"
+        content += transcriptItems.join(" ") + "\n\n"
+        
+        content += "--- AI SUGGESTIONS ---\n"
+        aiResponses.forEach((res, i) => {
+            content += `[Suggestion ${i+1}]: ${res.text}\n\n`
+        })
+        
+        const blob = new Blob([content], { type: "text/plain" })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = `interview_chat_${Date.now()}.txt`
+        a.click()
+        URL.revokeObjectURL(url)
+        addLog("Chat exported successfully")
+    }
+
     useEffect(() => {
         if (!isListening) {
             cleanupHardware()
@@ -133,7 +167,7 @@ function ContentApp() {
             }
             if (final) appendToTranscript(final.trim())
         }
-        recognitionRef.current.onend = () => { if (isListeningRef.current) try { recognitionRef.current.start() } catch(err){} }
+        recognitionRef.current.onend = () => { if (isListeningRef.current) try { recognitionRef.current.start() } catch (err) { } }
         recognitionRef.current.start()
         addLog("Native Engine Started")
     }
@@ -146,7 +180,7 @@ function ContentApp() {
             const analyser = ctx.createAnalyser()
             analyser.fftSize = 512
             source.connect(analyser)
-            
+
             recorderRef.current = new MediaRecorder(streamRef.current)
             recorderRef.current.ondataavailable = e => chunksBuffer.current.push(e.data)
             recorderRef.current.onstop = () => {
@@ -171,14 +205,14 @@ function ContentApp() {
                 analyser.getFloatTimeDomainData(pcm)
                 let sumSq = 0; for (let v of pcm) sumSq += v * v
                 const rms = Math.sqrt(sumSq / pcm.length)
-                
+
                 if (rms > 0.005) {
                     if (!isSpeakingLocal) {
                         isSpeakingLocal = true; phraseStart = Date.now()
                         if (recorderRef.current.state === 'inactive') recorderRef.current.start()
                     }
                     clearTimeout(silTimer); silTimer = null
-                    
+
                     // Force slice every 7s or on silence
                     if (Date.now() - phraseStart > 7000) {
                         isSpeakingLocal = false
@@ -212,13 +246,16 @@ function ContentApp() {
             }}>
                 <div className="ai-controls-group">
                     <button onClick={() => setAutoScroll(!autoScroll)} className={!autoScroll ? 'off' : ''} title="Auto-scroll">
-                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 13l5 5 5-5M7 6l5 5 5-5"/></svg>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 13l5 5 5-5M7 6l5 5 5-5" /></svg>
                     </button>
                     <button onClick={() => setIsPaused(!isPaused)} className={isPaused ? 'paused' : ''}>
-                         {isPaused ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 3l14 9-14 9V3z"/></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 4h4v16H6zM14 4h4v16h4z"/></svg>}
+                        {isPaused ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 3l14 9-14 9V3z" /></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 4h4v16H6zM14 4h4v16h4z" /></svg>}
+                    </button>
+                    <button onClick={exportChat} title="Export Chat">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
                     </button>
                     <button onClick={() => { setTranscriptItems([]); setAiResponses([]); setLogs([]); fullTranscriptRef.current = "" }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>
                     </button>
                 </div>
                 <div id="ai-interview-drag-handle">
@@ -226,12 +263,12 @@ function ContentApp() {
                     AI Assistant
                 </div>
                 <div className="ai-controls-group">
-                    <button onClick={() => setIsListening(false)} title="Close Assistant">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    <button onClick={stopAssistant} title="Close Assistant">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
                     </button>
                 </div>
             </div>
-            
+
             <div id="ai-interview-body">
                 <div className="ai-interview-pane">
                     <div className="ai-interview-pane-title">Live Transcript</div>
@@ -248,7 +285,7 @@ function ContentApp() {
                     </div>
                 </div>
             </div>
-            
+
             <div className="ai-interview-pane bottom-pane">
                 <div className="ai-interview-pane-title">Log</div>
                 <div className="pane-content log-content" ref={lRef}>

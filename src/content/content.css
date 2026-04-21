@@ -1,5 +1,5 @@
 #ai-interview-overlay {
-    position: fixed; top: 20px; right: 20px; width: 650px;
+    position: fixed; top: 0; left: 0; width: 650px;
     background: rgba(10, 10, 10, 0.75); 
     color: #f0f0f0;
     border-radius: 16px; z-index: 2147483647;

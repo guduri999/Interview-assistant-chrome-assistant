@@ -9,6 +9,10 @@ chrome.action.onClicked.addListener((tab) => {
     chrome.tabs.sendMessage(tab.id, { action: "TOGGLE_LISTENING" }, (res) => {
         if (chrome.runtime.lastError) {
             console.warn("Content script probably not injected in this tab. Try refreshing the page.");
+        } else {
+            // Reset memory on every toggle to strictly enforce a fresh conversation
+            chatHistory = [];
+            previousTranscript = "";
         }
     });
 });
@@ -16,6 +20,9 @@ chrome.action.onClicked.addListener((tab) => {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "TRANSCRIBE_CHUNK") {
         transcribeAudioWithGroq(request.audioData, sender.tab.id).catch(console.error);
+    } else if (request.action === "STOP_LISTENING") {
+        chatHistory = [];
+        previousTranscript = "";
     } else if (request.action === "PROCESS_TRANSCRIPT") {
         const now = Date.now();
         const timeSinceLastCall = now - lastCallTime;
