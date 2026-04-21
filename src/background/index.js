@@ -4,6 +4,63 @@ let debounceTimer = null;
 let lastCallTime = 0;
 let chatHistory = [];
 let previousTranscript = "";
+const OFFSCREEN_PATH = 'offscreen.html';
+
+async function hasOffscreenDocument() {
+    if (!chrome.runtime.getContexts) return false;
+
+    const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_PATH);
+    const contexts = await chrome.runtime.getContexts({
+        contextTypes: ['OFFSCREEN_DOCUMENT'],
+        documentUrls: [offscreenUrl]
+    });
+
+    return contexts.length > 0;
+}
+
+async function ensureOffscreenDocument() {
+    if (await hasOffscreenDocument()) return;
+
+    await chrome.offscreen.createDocument({
+        url: OFFSCREEN_PATH,
+        reasons: ['AUDIO_PLAYBACK', 'USER_MEDIA'],
+        justification: 'Play captured tab audio to the speakers while transcribing it.'
+    });
+}
+
+async function stopOffscreenPlayback() {
+    if (!(await hasOffscreenDocument())) return;
+
+    await chrome.runtime.sendMessage({ action: 'OFFSCREEN_STOP_AUDIO' }).catch(() => {});
+    await chrome.offscreen.closeDocument().catch(() => {});
+}
+
+async function startOffscreenTabEngine(tabId) {
+    await ensureOffscreenDocument();
+
+    return new Promise((resolve) => {
+        chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, async (streamId) => {
+            if (chrome.runtime.lastError || !streamId) {
+                resolve({
+                    ok: false,
+                    error: chrome.runtime.lastError?.message || "Failed to create a playback stream."
+                });
+                return;
+            }
+
+            try {
+                const response = await chrome.runtime.sendMessage({
+                    action: 'OFFSCREEN_START_TAB_ENGINE',
+                    streamId,
+                    tabId
+                });
+                resolve(response || { ok: false, error: 'No response from offscreen playback document.' });
+            } catch (error) {
+                resolve({ ok: false, error: error.message });
+            }
+        });
+    });
+}
 
 chrome.action.onClicked.addListener((tab) => {
     chrome.tabs.sendMessage(tab.id, { action: "TOGGLE_LISTENING" }, (res) => {
@@ -19,7 +76,13 @@ chrome.action.onClicked.addListener((tab) => {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "TRANSCRIBE_CHUNK") {
-        transcribeAudioWithGroq(request.audioData, sender.tab.id).catch(console.error);
+        const tabId = request.tabId || sender.tab?.id;
+        if (!tabId) {
+            sendResponse?.({ ok: false, error: "Missing tab id for transcription." });
+            return false;
+        }
+
+        transcribeAudioWithGroq(request.audioData, tabId).catch(console.error);
     } else if (request.action === "GET_TAB_AUDIO_STREAM_ID") {
         const tabId = sender.tab?.id;
         if (!tabId) {
@@ -43,9 +106,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
 
         return true;
+    } else if (request.action === "START_TAB_AUDIO_ENGINE") {
+        const tabId = sender.tab?.id;
+        if (!tabId) {
+            sendResponse({ ok: false, error: "Unable to find the active tab for tab audio engine." });
+            return false;
+        }
+
+        startOffscreenTabEngine(tabId)
+            .then(sendResponse)
+            .catch((error) => sendResponse({ ok: false, error: error.message }));
+        return true;
     } else if (request.action === "STOP_LISTENING") {
         chatHistory = [];
         previousTranscript = "";
+        stopOffscreenPlayback().catch(() => {});
     } else if (request.action === "PROCESS_TRANSCRIPT") {
         const now = Date.now();
         const timeSinceLastCall = now - lastCallTime;

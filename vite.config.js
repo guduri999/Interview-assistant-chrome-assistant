@@ -11,7 +11,8 @@ const manifest = {
     "activeTab",
     "storage",
     "scripting",
-    "tabCapture"
+    "tabCapture",
+    "offscreen"
   ],
   host_permissions: [
     "https://api.openai.com/*",
@@ -53,7 +54,8 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        options: 'options.html'
+        options: 'options.html',
+        offscreen: 'offscreen.html'
       }
     }
   }

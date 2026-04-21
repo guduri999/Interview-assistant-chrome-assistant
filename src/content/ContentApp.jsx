@@ -334,39 +334,20 @@ function ContentApp() {
     const startTabAudio = () => {
         addLog("Requesting current tab audio capture...", "info")
 
-        chrome.runtime.sendMessage({ action: "GET_TAB_AUDIO_STREAM_ID" }, async (response) => {
+        chrome.runtime.sendMessage({ action: "START_TAB_AUDIO_ENGINE" }, async (response) => {
             if (chrome.runtime.lastError) {
-                addLog(`Tab audio capture failed: ${chrome.runtime.lastError.message}`, "error")
+                addLog(`Tab audio engine failed: ${chrome.runtime.lastError.message}`, "error")
                 return
             }
 
-            if (!response?.ok || !response.streamId) {
-                addLog(response?.error || "Tab audio capture is unavailable on this page.", "error")
+            if (!response?.ok) {
+                addLog(response?.error || "Tab audio engine is unavailable on this page.", "error")
                 return
             }
 
-            try {
-                const tabStream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        mandatory: {
-                            chromeMediaSource: 'tab',
-                            chromeMediaSourceId: response.streamId
-                        }
-                    },
-                    video: false
-                })
-
-                addLog("Capturing tab audio only. Microphone is not used.", "info")
-                await startChunkedAudioCapture(tabStream, {
-                    label: "Tab Audio",
-                    threshold: 0.008,
-                    silenceMs: 1500,
-                    maxPhraseMs: 7000,
-                    sustainedFrames: 2
-                })
-            } catch (e) {
-                addLog(`Unable to start tab audio capture: ${e.message}`, "error")
-            }
+            addLog("Capturing tab audio only. Microphone is not used.", "info")
+            addLog("Tab audio is being forwarded to the system speakers", "info")
+            addLog("Tab Audio Engine Initialized", "info")
         })
     }
 
