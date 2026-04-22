@@ -90,6 +90,24 @@ chrome.action.onClicked.addListener((tab) => {
     });
 });
 
+chrome.commands.onCommand.addListener((command) => {
+    if (command !== '_execute_action') return;
+
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const activeTab = tabs[0];
+        if (!activeTab || !activeTab.id) return;
+
+        chrome.tabs.sendMessage(activeTab.id, { action: "TOGGLE_LISTENING" }, (res) => {
+            if (chrome.runtime.lastError) {
+                console.warn("Content script probably not injected in this tab. Try refreshing the page.");
+            } else {
+                chatHistory = [];
+                previousTranscript = "";
+            }
+        });
+    });
+});
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "TRANSCRIBE_CHUNK") {
         const tabId = request.tabId || sender.tab?.id;

@@ -389,7 +389,33 @@ function ContentApp() {
         [tRef, aRef, lRef].forEach(r => { if (r.current) r.current.scrollTop = r.current.scrollHeight })
     }, [transcriptItems, aiResponses, logs, autoScroll])
 
-    if (!isListening) return null
+    const startAssistant = () => {
+        setIsListening(true)
+    }
+
+    if (!isListening) {
+        return (
+            <div
+                id="ai-interview-overlay"
+                style={{
+                    position: 'fixed',
+                    bottom: '18px',
+                    right: '18px',
+                    zIndex: 2147483647,
+                    background: 'rgba(10, 10, 10, 0.9)',
+                    color: '#fff',
+                    borderRadius: '14px',
+                    padding: '12px 16px',
+                    boxShadow: '0 16px 40px rgba(0,0,0,0.35)',
+                    fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+                    cursor: 'pointer'
+                }}
+                onClick={startAssistant}
+            >
+                Open AI Interview Assistant
+            </div>
+        )
+    }
 
     return (
         <div id="ai-interview-overlay" style={{ transform: `translate3d(${position.x}px, ${position.y}px, 0)` }}>
