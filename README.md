@@ -1,68 +1,105 @@
 # AI Interview Assistant (React + Vite)
 
-A modern, high-performance Chrome Extension designed to provide real-time AI-generated suggestions during interviews using Speech-to-Text and Groq LLMs.
+A Chrome extension that provides live interview support with speech-to-text transcription and AI-powered guidance.
 
-## 🚀 Features
+## Overview
 
-- **Dual Transcription Engines**: 
-  - **Whisper (Groq API)**: High-accuracy AI transcription with advanced VAD (Voice Activity Detection).
-  - **Native (Browser)**: Zero-cost, local browser-based speech recognition.
-- **Real-time AI Streaming**: Suggestions appear token-by-token using Groq's `llama-3.1-8b-instant`.
-- **Glassmorphism UI**: Beautiful, draggable overlay window with blur effects.
-- **VAD Optimization**: Intelligently filters out background noise, keyboard clicks, and silent "hallucinations".
-- **Chat Export**: One-click download of your full interview transcript and AI tips as a `.txt` file.
-- **Privacy Mode**: Automatically wipes chat history when the assistant is closed.
+This extension listens to spoken interview dialogue, converts it to text, and delivers context-aware suggestions using Groq APIs. It supports microphone capture, browser-native speech recognition, and tab audio capture.
 
-## 🛠 Tech Stack
+## Features
 
-- **Framework**: React 18
-- **Bundler**: Vite + CRXJS (Vite Plugin for Chrome Extensions)
-- **Styling**: Vanilla CSS (Modern CSS variables + glassmorphism)
-- **API**: Groq Cloud (Whisper-large-v3 + Llama-3.1)
+- Dual transcription modes:
+  - **Whisper (Groq)**: Microphone capture with voice activity detection.
+  - **Native Browser Speech**: Local speech-to-text using browser APIs.
+  - **Tab Audio Capture**: Listen to audio from the active browser tab.
+- Real-time AI suggestions streamed while you speak.
+- Draggable floating overlay with transcript, AI responses, and logs.
+- Export session transcript and suggestions as a `.txt` file.
+- Settings page for API key, transcription engine, and job context.
 
-## 📦 Getting Started
+## Tech Stack
 
-### 1. Prerequisites
-- [Node.js](https://nodejs.org/) (v16 or higher)
-- NPM (v8 or higher)
-- A Groq API Key (Get it at [console.groq.com](https://console.groq.com/))
+- React 18
+- Vite
+- CRXJS Chrome extension plugin
+- Groq API for speech transcription and AI response
 
-### 2. Installation
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/guduri999/Interview-assistant-chrome-assistant.git
-   cd Interview-assistant-chrome-assistant
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
+## Setup
 
-### 3. Build the Extension
+### Requirements
+
+- Node.js 16+
+- npm 8+
+- Groq API key
+
+### Install
+
+```bash
+git clone https://github.com/guduri999/Interview-assistant-chrome-assistant.git
+cd Interview-chrome-assistant
+npm install
+```
+
+### Build
+
 ```bash
 npm run build
 ```
-This will create a `dist/` folder in your project directory.
 
-### 4. Load into Chrome
-1. Open Chrome and navigate to `chrome://extensions/`.
-2. Enable **Developer mode** (top right toggle).
-3. Click **Load unpacked**.
-4. Select the **`dist/`** folder inside your project directory.
+### Load Extension in Chrome
 
-## ⚙️ Configuration
+1. Open `chrome://extensions/`
+2. Enable **Developer mode**
+3. Click **Load unpacked**
+4. Select the generated `dist/` folder
 
-1. Click the **AI Assistant** icon in your toolbar or right-click the extension to go to **Options**.
-2. Enter your **Groq API Key**.
-3. (Optional) Provide a **Job Description** to give the AI more context about your interview.
-4. Select your preferred **Transcription Engine**.
+## Configuration
 
-## 🖱 Usage
+Open the extension options page and configure:
 
-- **Toggle**: Click the extension icon in the Chrome toolbar to open/close the assistant on any webpage.
-- **Move**: Drag the header to reposition the window.
-- **Pause**: Use the pause button to temporarily stop listening.
-- **Export**: Click the download icon to save your notes.
+- `Groq API Key`
+- `Transcription Engine`
+- Optional `Job Description` context
 
-## 📄 License
+## Usage
+
+- Click the extension action icon to open the assistant.
+- Speak naturally and watch the live transcript update.
+- Read AI suggestions as the assistant processes the conversation.
+- Use pause, clear, and export controls from the overlay.
+
+## Scripts
+
+- `npm run dev` - build in watch mode
+- `npm run build` - production build
+- `npm run docs` - generate documentation from source comments
+
+## Documentation
+
+- `API.md` — human-readable API reference
+- `docs/` — generated JSDoc HTML documentation
+
+## License
+
 MIT
+
+## 📚 Documentation
+
+This project includes comprehensive documentation generated from the codebase:
+
+### API Documentation
+- **[API.md](API.md)**: Detailed API reference for all functions, components, and message protocols
+- **[docs/](docs/)**: JSDoc-generated HTML documentation
+
+### Generating Documentation
+To regenerate the documentation after code changes:
+```bash
+npm run docs
+```
+
+The documentation includes:
+- Function signatures and parameters
+- Return types and descriptions
+- Component overviews
+- Message protocol details
+- Architecture explanations
