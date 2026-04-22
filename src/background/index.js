@@ -157,10 +157,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }, 2200 - timeSinceLastCall);
         }
     } else if (request.action === "isCaptured") {
-        chrome.tabCapture.getCapturedTabs().then(tabs => {
-            const isCaptured = tabs.some(tab => tab.tabId === sender.tab.id);
+        chrome.tabCapture.getCapturedTabs((tabs) => {
+            if (chrome.runtime.lastError || !tabs) {
+                sendResponse({isCaptured: false});
+                return;
+            }
+
+            const isCaptured = tabs.some(tab => tab.tabId === sender.tab?.id);
             sendResponse({isCaptured});
-        }).catch(() => sendResponse({isCaptured: false}));
+        });
         return true;
     }
 });

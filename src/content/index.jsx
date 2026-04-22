@@ -5,23 +5,22 @@ import './content.css'
 
 const root = document.createElement('div')
 root.id = 'ai-interview-assistant-root'
-root.style.display = 'none'  // Start hidden by default
+root.style.display = 'block'
 document.body.appendChild(root)
 
-let isHidden = true;
+let isHidden = false;
 
 function checkCapture() {
   chrome.runtime.sendMessage({action: 'isCaptured'}, (response) => {
-    const shouldHide = response?.isCaptured === true;
-
     if (chrome.runtime.lastError) {
-      // If the background call fails for any reason, keep the UI visible.
       if (isHidden) {
         isHidden = false;
         root.style.display = 'block';
       }
       return;
     }
+
+    const shouldHide = response?.isCaptured === true;
 
     if (shouldHide !== isHidden) {
       isHidden = shouldHide;
