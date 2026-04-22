@@ -8,30 +8,37 @@ const script = document.createElement('script');
 script.textContent = `
   (function() {
     const originalGetDisplayMedia = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices);
-    navigator.mediaDevices.getDisplayMedia = async function(constraints) {
-      window.dispatchEvent(new CustomEvent('AI_ASSISTANT_STEALTH_ON'));
-      try {
-        const stream = await originalGetDisplayMedia(constraints);
-        stream.getVideoTracks()[0].addEventListener('ended', () => {
-          window.dispatchEvent(new CustomEvent('AI_ASSISTANT_STEALTH_OFF'));
-        }, { once: true });
-        return stream;
-      } catch (err) {
-        window.dispatchEvent(new CustomEvent('AI_ASSISTANT_STEALTH_OFF'));
-        throw err;
-      }
-    };
+    Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', {
+      value: async function(constraints) {
+        window.postMessage({ type: 'AI_ASSISTANT_STEALTH_ON' }, '*');
+        try {
+          const stream = await originalGetDisplayMedia(constraints);
+          stream.getVideoTracks()[0].addEventListener('ended', () => {
+            window.postMessage({ type: 'AI_ASSISTANT_STEALTH_OFF' }, '*');
+          }, { once: true });
+          return stream;
+        } catch (err) {
+          window.postMessage({ type: 'AI_ASSISTANT_STEALTH_OFF' }, '*');
+          throw err;
+        }
+      },
+      configurable: true,
+      writable: true
+    });
   })();
 `;
 (document.head || document.documentElement).appendChild(script);
 script.remove();
 
-const root = document.createElement('div')
-root.id = 'ai-interview-assistant-root'
-document.body.appendChild(root)
+// Only render the UI in the top frame
+if (window === window.top) {
+  const root = document.createElement('div')
+  root.id = 'ai-interview-assistant-root'
+  document.body.appendChild(root)
 
-ReactDOM.createRoot(root).render(
-  <React.StrictMode>
-    <ContentApp />
-  </React.StrictMode>
-)
+  ReactDOM.createRoot(root).render(
+    <React.StrictMode>
+      <ContentApp />
+    </React.StrictMode>
+  )
+}

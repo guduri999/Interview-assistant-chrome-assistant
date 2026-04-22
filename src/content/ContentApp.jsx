@@ -113,14 +113,12 @@ function ContentApp() {
 
     // Automatic Stealth Mode Detection
     useEffect(() => {
-        const onStop = () => setIsVisible(false)
-        const onStart = () => setIsVisible(true)
-        window.addEventListener('AI_ASSISTANT_STEALTH_ON', onStop)
-        window.addEventListener('AI_ASSISTANT_STEALTH_OFF', onStart)
-        return () => {
-            window.removeEventListener('AI_ASSISTANT_STEALTH_ON', onStop)
-            window.removeEventListener('AI_ASSISTANT_STEALTH_OFF', onStart)
+        const handleMessage = (event) => {
+            if (event.data?.type === 'AI_ASSISTANT_STEALTH_ON') setIsVisible(false)
+            if (event.data?.type === 'AI_ASSISTANT_STEALTH_OFF') setIsVisible(true)
         }
+        window.addEventListener('message', handleMessage)
+        return () => window.removeEventListener('message', handleMessage)
     }, [])
 
     // Hotkey for Stealth Mode (Alt + S)
