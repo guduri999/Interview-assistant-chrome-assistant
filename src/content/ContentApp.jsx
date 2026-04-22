@@ -12,6 +12,7 @@ function ContentApp() {
         y: (window.innerHeight - 600) / 2 
     })
     const [activeEngine, setActiveEngine] = useState("init...")
+    const [isVisible, setIsVisible] = useState(true)
 
     // Logic Persistence Refs
     const isListeningRef = useRef(false)
@@ -40,7 +41,7 @@ function ContentApp() {
     }, [isListening, isPaused])
 
     const addLog = (text, type = 'info') => {
-        setLogs(prev => [...prev, { text, time: new Date().toLocaleTimeString(), type, id: Date.now() }])
+        chrome.runtime.sendMessage({ action: "ADD_LOG", text, type });
     }
 
     const appendToTranscript = (text) => {
@@ -78,17 +79,59 @@ function ContentApp() {
                 if (request.response === "Thinking...") return
                 setAiResponses(prev => [...prev, { text: request.response, id: Date.now() }])
             } else if (request.action === 'START_AI_STREAM') {
-                const id = Date.now()
+                const id = request.id || Date.now()
                 aiStreamBlockId.current = id
                 setAiResponses(prev => [...prev, { text: '', id, isStreaming: true }])
             } else if (request.action === 'STREAM_AI_TOKEN') {
-                setAiResponses(prev => prev.map(m => m.id === aiStreamBlockId.current ? { ...m, text: m.text + request.token } : m))
+                const id = request.id || aiStreamBlockId.current
+                setAiResponses(prev => prev.map(m => m.id === id ? { ...m, text: m.text + request.token } : m))
             } else if (request.action === 'DELETE_SPAM_BLOCK') {
-                setAiResponses(prev => prev.filter(m => m.id !== aiStreamBlockId.current))
+                const id = request.id || aiStreamBlockId.current
+                setAiResponses(prev => prev.filter(m => m.id !== id))
+            } else if (request.action === 'LOG_ADDED') {
+                setLogs(prev => [...prev, request.log])
+            } else if (request.action === 'STATE_RESET') {
+                setTranscriptItems([])
+                setAiResponses([])
+                setLogs([])
+                fullTranscriptRef.current = ""
             }
         }
         chrome.runtime.onMessage.addListener(listener)
+        
+        // Initial sync
+        chrome.runtime.sendMessage({ action: "SYNC_STATE" }, (res) => {
+            if (res) {
+                setTranscriptItems(res.transcriptItems || [])
+                setAiResponses(res.aiResponses || [])
+                setLogs(res.logs || [])
+            }
+        })
+
         return () => chrome.runtime.onMessage.removeListener(listener)
+    }, [])
+
+    // Automatic Stealth Mode Detection
+    useEffect(() => {
+        const onStop = () => setIsVisible(false)
+        const onStart = () => setIsVisible(true)
+        window.addEventListener('AI_ASSISTANT_STEALTH_ON', onStop)
+        window.addEventListener('AI_ASSISTANT_STEALTH_OFF', onStart)
+        return () => {
+            window.removeEventListener('AI_ASSISTANT_STEALTH_ON', onStop)
+            window.removeEventListener('AI_ASSISTANT_STEALTH_OFF', onStart)
+        }
+    }, [])
+
+    // Hotkey for Stealth Mode (Alt + S)
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.altKey && e.key.toLowerCase() === 's') {
+                setIsVisible(prev => !prev)
+            }
+        }
+        window.addEventListener('keydown', handleKeyDown)
+        return () => window.removeEventListener('keydown', handleKeyDown)
     }, [])
 
     // Global Drag
@@ -156,6 +199,7 @@ function ContentApp() {
             stateRef.current.engine = engineId
             addLog(`Initializing Engine: ${engineId.toUpperCase()}`, 'info')
             setActiveEngine(engineId.toUpperCase())
+            addLog(`Stealth Mode: Press Alt+S to hide/show this overlay`, 'info')
             
             if (engineId === 'whisper') startWhisper()
             else if (engineId === 'native') startNative()
@@ -392,7 +436,10 @@ function ContentApp() {
     if (!isListening) return null
 
     return (
-        <div id="ai-interview-overlay" style={{ transform: `translate3d(${position.x}px, ${position.y}px, 0)` }}>
+        <div id="ai-interview-overlay" style={{ 
+            transform: `translate3d(${position.x}px, ${position.y}px, 0)`,
+            display: isVisible ? 'flex' : 'none'
+        }}>
             <div id="ai-interview-header" onMouseDown={(e) => {
                 dragInfo.current.isDragging = true
                 dragInfo.current.offset = { x: e.clientX - position.x, y: e.clientY - position.y }

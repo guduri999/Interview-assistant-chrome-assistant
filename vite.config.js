@@ -18,9 +18,7 @@ const manifest = {
     "https://api.openai.com/*",
     "https://api.groq.com/*"
   ],
-  action: {
-    // REMOVED default_popup to allow background script to handle onClicked
-  },
+  action: {},
   options_ui: {
     "page": "options.html",
     "open_in_tab": true
@@ -32,18 +30,10 @@ const manifest = {
   content_scripts: [
     {
       "matches": ["<all_urls>"],
-      "js": ["src/content/index.jsx"]
+      "js": ["src/content/index.jsx"],
+      "run_at": "document_start"
     }
-  ],
-  commands: {
-    "_execute_action": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+K",
-        "mac": "Command+Shift+K"
-      },
-      "description": "Toggle AI Interview Assistant"
-    }
-  }
+  ]
 };
 
 export default defineConfig({

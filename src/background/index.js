@@ -2,6 +2,10 @@ let debounceTimer = null;
 let lastCallTime = 0;
 let chatHistory = [];
 let previousTranscript = "";
+let transcriptItems = [];
+let aiResponses = [];
+let logs = [];
+let activeTabId = null;
 const OFFSCREEN_PATH = 'offscreen.html';
 
 async function hasOffscreenDocument() {
@@ -79,19 +83,35 @@ async function startOffscreenTabEngine(tabId) {
 }
 
 chrome.action.onClicked.addListener((tab) => {
+    activeTabId = tab.id;
     chrome.tabs.sendMessage(tab.id, { action: "TOGGLE_LISTENING" }, (res) => {
         if (chrome.runtime.lastError) {
             console.warn("Content script probably not injected in this tab. Try refreshing the page.");
         } else {
-            // Reset memory on every toggle to strictly enforce a fresh conversation
+            // Reset memory on every toggle
             chatHistory = [];
             previousTranscript = "";
+            transcriptItems = [];
+            aiResponses = [];
+            logs = [];
+            notifyViews({ action: "STATE_RESET" });
         }
     });
 });
 
+function notifyViews(message) {
+    if (activeTabId) {
+        chrome.tabs.sendMessage(activeTabId, message).catch(() => {});
+    }
+    chrome.runtime.sendMessage(message).catch(() => {});
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === "TRANSCRIBE_CHUNK") {
+    if (request.action === "ADD_LOG") {
+        const log = { text: request.text, type: request.type || 'info', time: new Date().toLocaleTimeString(), id: Date.now() };
+        logs.push(log);
+        notifyViews({ action: "LOG_ADDED", log });
+    } else if (request.action === "TRANSCRIBE_CHUNK") {
         const tabId = request.tabId || sender.tab?.id;
         if (!tabId) {
             sendResponse?.({ ok: false, error: "Missing tab id for transcription." });
@@ -190,12 +210,12 @@ async function fetchAIResponse(transcript, tabId) {
     }
 
     if (!apiKey) {
-        chrome.tabs.sendMessage(tabId, { action: "SHOW_AI_RESPONSE", response: "Error: Please add your Groq API Key in the settings." });
+        notifyViews({ action: "SHOW_AI_RESPONSE", response: "Error: Please add your Groq API Key in the settings." });
         chrome.runtime.openOptionsPage();
         return;
     }
 
-    chrome.tabs.sendMessage(tabId, { action: "SHOW_AI_RESPONSE", response: "Thinking..." });
+    notifyViews({ action: "SHOW_AI_RESPONSE", response: "Thinking..." });
 
     try {
         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -222,10 +242,11 @@ Rules: Keep 1-2 lines max. Simple spoken English. No headings/bullets. Conversat
             const data = await response.json();
             throw new Error(data.error?.message || "Unknown API Error");
         }
-        chrome.tabs.sendMessage(tabId, { action: "START_AI_STREAM" });
+        notifyViews({ action: "START_AI_STREAM" });
         const reader = response.body.getReader();
         const decoder = new TextDecoder("utf-8");
         let fullAnswer = "";
+        let aid = Date.now();
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -238,21 +259,22 @@ Rules: Keep 1-2 lines max. Simple spoken English. No headings/bullets. Conversat
                         if (parsed.choices?.[0].delta?.content) {
                             const token = parsed.choices[0].delta.content;
                             fullAnswer += token;
-                            chrome.tabs.sendMessage(tabId, { action: "STREAM_AI_TOKEN", token: token });
+                            notifyViews({ action: "STREAM_AI_TOKEN", token: token, id: aid });
                         }
                     } catch (e) {}
                 }
             }
         }
         if (!fullAnswer.includes("[NO_ANSWER_NEEDED]")) {
+            aiResponses.push({ text: fullAnswer, id: aid });
             chatHistory.push({ role: "user", content: `Latest Full Transcript: ${transcript}` });
             chatHistory.push({ role: "assistant", content: fullAnswer });
             if (chatHistory.length > 6) chatHistory = chatHistory.slice(chatHistory.length - 6);
         } else {
-            chrome.tabs.sendMessage(tabId, { action: "DELETE_SPAM_BLOCK" });
+            notifyViews({ action: "DELETE_SPAM_BLOCK", id: aid });
         }
     } catch (error) {
-        chrome.tabs.sendMessage(tabId, { action: "SHOW_AI_RESPONSE", response: `Error: ${error.message}` });
+        notifyViews({ action: "SHOW_AI_RESPONSE", response: `Error: ${error.message}` });
     }
 }
 
@@ -266,7 +288,7 @@ async function transcribeAudioWithGroq(base64Audio, tabId) {
     }
 
     if (!apiKey) {
-        chrome.tabs.sendMessage(tabId, {
+        notifyViews({
             action: "SHOW_AI_RESPONSE",
             response: "Error: Please add your Groq API Key in the settings."
         });
@@ -299,7 +321,10 @@ async function transcribeAudioWithGroq(base64Audio, tabId) {
                 if (segment.no_speech_prob < 0.25) actualSpeech += segment.text + " ";
             }
             actualSpeech = actualSpeech.trim();
-            chrome.tabs.sendMessage(tabId, { action: "CHUNK_TRANSCRIBED", text: actualSpeech });
+            if (actualSpeech) {
+                transcriptItems.push(actualSpeech);
+                notifyViews({ action: "CHUNK_TRANSCRIBED", text: actualSpeech });
+            }
         }
     } catch (err) {}
 }
