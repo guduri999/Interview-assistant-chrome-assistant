@@ -12,7 +12,17 @@ let isHidden = true;
 
 function checkCapture() {
   chrome.runtime.sendMessage({action: 'isCaptured'}, (response) => {
-    const shouldHide = response && response.isCaptured;
+    const shouldHide = response?.isCaptured === true;
+
+    if (chrome.runtime.lastError) {
+      // If the background call fails for any reason, keep the UI visible.
+      if (isHidden) {
+        isHidden = false;
+        root.style.display = 'block';
+      }
+      return;
+    }
+
     if (shouldHide !== isHidden) {
       isHidden = shouldHide;
       root.style.display = isHidden ? 'none' : 'block';
